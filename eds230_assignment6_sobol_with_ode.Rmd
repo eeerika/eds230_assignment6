@@ -114,7 +114,9 @@ idx = ifelse(is.na(idx), length(result$P), idx)
 threshyear = result$time[idx]
 return(list(maxpop=maxpop, threshyear=threshyear))}
 
-# Define a wrapper function to do everything we need - run solver and compute metrics - and send back results for each parameter
+# Define a wrapper function to do everything we need 
+# - run solver and compute metrics 
+# - and send back results for each parameter
 
 # Keep threshold same as before
 
@@ -128,7 +130,11 @@ p_wrapper <- function(threshold, r, g, K, C, time, func) {
 }
 
 # Now use pmap as we did before
-allresults <- as.data.frame(sens_P$X) %>% pmap(p_wrapper, threshold = threshold, C = C, time = time, func = calc_forest_growth)
+allresults <- as.data.frame(sens_P$X) %>% pmap(p_wrapper, 
+                                               threshold = threshold, 
+                                               C = C, 
+                                               time = time, 
+                                               func = calc_forest_growth)
 
 # Extract out results from pmap into a data frame
 allres <- allresults %>% map_dfr(`[`,c("maxpop", "threshyear"))
