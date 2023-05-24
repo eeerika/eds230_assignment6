@@ -1,0 +1,206 @@
+---
+title: 'EDS 230 Assignment 6: Using Sobol with an ODE'
+author: "Erika Egg"
+date: "2023-05-24"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(deSolve)
+library(sensitivity)
+library(kableExtra)
+```
+
+1. Implement this model in R (as a differential equation)
+
+```{r}
+# Source the function
+source("calc_forest_growth.R")
+```
+
+2. Run the model for 300 years (using the ODE solver) starting with an initial forest size of 10 kg/C, and using the following parameters:
+- canopy closure threshold of 50 kgC
+- K = 250 kg C (carrying capacity)
+- r = 0.01 (exponential growth rate before before canopy closure)
+- g = 2 kg/year (linear growth rate after canopy closure)
+
+```{r}
+# Run the model for the specified values
+# Set values
+time <- seq(from = 1, to = 300) # 300 years
+C <- 10
+threshold <- 50
+K <- 250
+r <- 0.01 
+g <- 2 
+
+# Create obj to pass to func
+parms <- list(time = time, threshold = threshold, K = K, r = r, g = g)
+
+# Run our differential equation and keep the output
+result <- ode(y = C, times = time, func = calc_forest_growth, parms = parms)
+
+head(result)
+colnames(result) = c("time","P")
+```
+
+3. Graph the results. Here you are graphing the trajectory with the parameters as given (e.g no uncertainty)
+
+```{r}
+# Create graph
+result <- as.data.frame(result)
+ggplot(result, aes(time, P)) + 
+  geom_point() +
+  labs(x = "Time (years)",
+       y = "Population of forest") +
+  theme_minimal()
+```
+
+4. Run a sobol global (vary all parameters at the same time) sensitivity analysis that explores how the estimated maximum forest size (e.g maximum of 300 years, varies with these parameters
+- pre canopy closure growth rate (r)
+- post-canopy closure growth rate (g)
+- canopy closure threshold and carrying capacity (K)
+Assume that parameters are all normally distributed with means as given above and standard deviation of 10% of mean value
+
+```{r}
+# Come up with first set of sample parameters
+# We will assume that we know C and threshold
+
+C <- 10 # same as before
+threshold <- 50 # same as before
+
+# Want to learn about sensitivity to threshold, r, g, and K
+# Set the number of parameters
+np <- 100
+
+# Create first sample parameters from normal distributions 
+r <- rnorm(mean = 0.01, sd = r * 0.10, n = np)
+g <- rnorm(mean = 2, sd = g * 0.10, n = np)
+K <- rnorm(mean = 250, sd = K * 0.10, n = np)
+
+# Create the first dataframe 
+X1 <- cbind.data.frame(r = r, g = g, K = K)
+
+# Repeat to get our second set of samples
+r <- rnorm(mean = 0.01, sd = r * 0.10, n = np)
+g <- rnorm(mean = 2, sd = g * 0.10, n = np)
+K <- rnorm(mean = 250, sd = K * 0.10, n = np)
+
+# Create the second dataframe 
+X2 <- cbind.data.frame(r = r, g = g, K = K)
+
+# Create our sobel object and get sets ofparameters for running the model
+sens_P <- sobolSalt(model = NULL, X1, X2, nboot = 300)
+
+# Our parameter sets are
+head(sens_P$X)
+
+# Let's add names 
+colnames(sens_P$X) <- c("r", "g", "K")
+```
+
+```{r}
+# Look at maximums
+# Turn computing our metrics into a function (use one from class)
+
+compute_metrics = function(result, thresh) {
+  maxpop = max(result$P)
+idx = which(result$P > thresh)[1]
+idx = ifelse(is.na(idx), length(result$P), idx)
+threshyear = result$time[idx]
+return(list(maxpop=maxpop, threshyear=threshyear))}
+
+# Define a wrapper function to do everything we need - run solver and compute metrics - and send back results for each parameter
+
+# Keep threshold same as before
+
+p_wrapper <- function(threshold, r, g, K, C, time, func) {
+    parms <- list(threshold = threshold, r = r, g = g, K = K)
+    result <- ode(y = C, time = time, func = func, parms = parms) 
+    colnames(result) <- c("time", "P")
+  # Get metrics
+  metrics <- compute_metrics(as.data.frame(result), thresh = threshold)
+  return(metrics)
+}
+
+# Now use pmap as we did before
+allresults <- as.data.frame(sens_P$X) %>% pmap(p_wrapper, threshold = threshold, C = C, time = time, func = calc_forest_growth)
+
+# Extract out results from pmap into a data frame
+allres <- allresults %>% map_dfr(`[`,c("maxpop", "threshyear"))
+```
+
+5. Graph the results of the sensitivity analysis as a box plot of maximum forest size and record the two Sobol indices (S and T).
+
+```{r}
+# Create metrics graph (box plot)
+tmp <- allres %>% pivot_longer(cols = everything(), names_to = "metric", values_to = "value")
+ggplot(tmp, aes(metric, value, col = metric)) + 
+  geom_boxplot() +
+  theme_minimal() +
+  labs(x = "Metric",
+       y = "Value",
+       fill = "Metric",
+       title = "Box plot of maximum forest size")
+
+# Prep to create S & T index graphs
+# Sobol can only handle one output at a time  - so we will need to do them separately
+
+sens_P_maxpop = sensitivity::tell(sens_P, allres$maxpop)
+
+# First-order indices (main effect without co-variance)
+max_S <- as.data.frame(sens_P_maxpop$S)
+
+# Total sensitivity index -note that this partitions the output variance 
+max_T <- as.data.frame(sens_P_maxpop$T)
+
+# Get ready to plot these two dfs
+max_S <- max_S %>% 
+  rowid_to_column(var = "parameter")
+
+max_S[1,1] <- "r"
+max_S[2,1] <- "g"
+max_S[3,1] <- "K"
+
+max_T <- max_T %>% 
+  rowid_to_column(var = "parameter")
+
+max_T[1,1] <- "r"
+max_T[2,1] <- "g"
+max_T[3,1] <- "K"
+
+# PLot these
+ggplot(max_T, aes(x = original, y = reorder(parameter, original))) +
+  geom_col(fill = "black") +
+  theme_minimal() +
+  labs(title = "Total sensitivity index for maximum",
+       x = "Sobol index",
+       y = "Parameter")
+
+ggplot(max_S, aes(x = original, y = reorder(parameter, original))) +
+  geom_col(fill = "black") +
+  theme_minimal() +
+  labs(title = "First-order sensitivity index for maximum",
+       x = "Sobol index",
+       y = "Parameter")
+
+# Show in table form too
+max_T %>%
+   kbl(caption = "Total sensitivity index for maximum") %>%
+   kable_paper(full_width = F) %>%
+   kable_styling(latex_options = "HOLD_position")
+
+max_S %>%
+   kbl(caption = "First-order sensitivity index for maximum") %>%
+   kable_paper(full_width = F) %>%
+    kable_styling(latex_options = "HOLD_position")
+```
+
+
+6. In 2-3 sentences, discuss what the results of your simulation might mean. (For example think about how what parameters climate change might influence).
+
+**Parameters r and K have the highest total sensitivity index and first-order sensitivity index (K is higher for the former, and r is higher for the latter). This means that changes in these due to climate change (ie. changing temperature impacting exponential growth rate and carrying capacity) could change forest growth more significantly. We should keep this under consideration when using a model such as this.**
