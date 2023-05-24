@@ -68,7 +68,7 @@ Assume that parameters are all normally distributed with means as given above an
 
 ```{r}
 # Come up with first set of sample parameters
-# We will assume that we know C and threshold
+# We will assume that we know C
 
 C <- 10 # same as before
 
