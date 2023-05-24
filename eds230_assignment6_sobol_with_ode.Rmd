@@ -71,7 +71,6 @@ Assume that parameters are all normally distributed with means as given above an
 # We will assume that we know C and threshold
 
 C <- 10 # same as before
-threshold <- 50 # same as before
 
 # Want to learn about sensitivity to threshold, r, g, and K
 # Set the number of parameters
@@ -80,18 +79,20 @@ np <- 100
 # Create first sample parameters from normal distributions 
 r <- rnorm(mean = 0.01, sd = r * 0.10, n = np)
 g <- rnorm(mean = 2, sd = g * 0.10, n = np)
+threshold <- rnorm(mean = 50, sd = threshold * 0.10, n = np)
 K <- rnorm(mean = 250, sd = K * 0.10, n = np)
 
 # Create the first dataframe 
-X1 <- cbind.data.frame(r = r, g = g, K = K)
+X1 <- cbind.data.frame(r = r, g = g, threshold = threshold, K = K)
 
 # Repeat to get our second set of samples
 r <- rnorm(mean = 0.01, sd = r * 0.10, n = np)
 g <- rnorm(mean = 2, sd = g * 0.10, n = np)
+threshold <- rnorm(mean = 50, sd = threshold * 0.10, n = np)
 K <- rnorm(mean = 250, sd = K * 0.10, n = np)
 
 # Create the second dataframe 
-X2 <- cbind.data.frame(r = r, g = g, K = K)
+X2 <- cbind.data.frame(r = r, g = g, threshold = threshold, K = K)
 
 # Create our sobel object and get sets ofparameters for running the model
 sens_P <- sobolSalt(model = NULL, X1, X2, nboot = 300)
@@ -100,19 +101,16 @@ sens_P <- sobolSalt(model = NULL, X1, X2, nboot = 300)
 head(sens_P$X)
 
 # Let's add names 
-colnames(sens_P$X) <- c("r", "g", "K")
+colnames(sens_P$X) <- c("r", "g", "threshold", "K")
 ```
 
 ```{r}
 # Look at maximums
-# Turn computing our metrics into a function (use one from class)
+# Turn computing our metrics into a function (use one from class, but just max)
 
-compute_metrics = function(result, thresh) {
+compute_metric <- function(result) {
   maxpop = max(result$P)
-idx = which(result$P > thresh)[1]
-idx = ifelse(is.na(idx), length(result$P), idx)
-threshyear = result$time[idx]
-return(list(maxpop=maxpop, threshyear=threshyear))}
+return(list(maxpop=maxpop))}
 
 # Define a wrapper function to do everything we need 
 # - run solver and compute metrics 
@@ -125,19 +123,18 @@ p_wrapper <- function(threshold, r, g, K, C, time, func) {
     result <- ode(y = C, time = time, func = func, parms = parms) 
     colnames(result) <- c("time", "P")
   # Get metrics
-  metrics <- compute_metrics(as.data.frame(result), thresh = threshold)
+  metrics <- compute_metric(as.data.frame(result))
   return(metrics)
 }
 
 # Now use pmap as we did before
 allresults <- as.data.frame(sens_P$X) %>% pmap(p_wrapper, 
-                                               threshold = threshold, 
                                                C = C, 
                                                time = time, 
                                                func = calc_forest_growth)
 
 # Extract out results from pmap into a data frame
-allres <- allresults %>% map_dfr(`[`,c("maxpop", "threshyear"))
+allres <- allresults %>% map_dfr(`[`,c("maxpop"))
 ```
 
 5. Graph the results of the sensitivity analysis as a box plot of maximum forest size and record the two Sobol indices (S and T).
@@ -145,12 +142,11 @@ allres <- allresults %>% map_dfr(`[`,c("maxpop", "threshyear"))
 ```{r}
 # Create metrics graph (box plot)
 tmp <- allres %>% pivot_longer(cols = everything(), names_to = "metric", values_to = "value")
-ggplot(tmp, aes(metric, value, col = metric)) + 
+ggplot(tmp, aes(metric, value)) + 
   geom_boxplot() +
   theme_minimal() +
   labs(x = "Metric",
        y = "Value",
-       fill = "Metric",
        title = "Box plot of maximum forest size")
 
 # Prep to create S & T index graphs
@@ -170,14 +166,16 @@ max_S <- max_S %>%
 
 max_S[1,1] <- "r"
 max_S[2,1] <- "g"
-max_S[3,1] <- "K"
+max_S[3,1] <- "threshold"
+max_S[4,1] <- "K"
 
 max_T <- max_T %>% 
   rowid_to_column(var = "parameter")
 
 max_T[1,1] <- "r"
 max_T[2,1] <- "g"
-max_T[3,1] <- "K"
+max_T[3,1] <- "threshold"
+max_T[4,1] <- "K"
 
 # PLot these
 ggplot(max_T, aes(x = original, y = reorder(parameter, original))) +
@@ -209,4 +207,4 @@ max_S %>%
 
 6. In 2-3 sentences, discuss what the results of your simulation might mean. (For example think about how what parameters climate change might influence).
 
-**Parameters r and K have the highest total sensitivity index and first-order sensitivity index (K is higher for the former, and r is higher for the latter). This means that changes in these due to climate change (ie. changing temperature impacting exponential growth rate and carrying capacity) could change forest growth more significantly. We should keep this under consideration when using a model such as this.**
+**Parameters K and r have the highest total sensitivity index and first-order sensitivity index (K is higher for both). This means that changes in these due to climate change (ie. changing temperature impacting carrying capacity and exponential growth rate) could change forest growth more significantly. We should keep this under consideration when using a model such as this.**
